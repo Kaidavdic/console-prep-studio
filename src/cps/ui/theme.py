@@ -98,6 +98,25 @@ def text_on(background: QColor) -> QColor:
     return white if contrast_ratio(white, background) >= contrast_ratio(black, background) else black
 
 
+def apply_palette(app) -> None:
+    """Pin the selection colours.
+
+    A selected row is painted from the palette's Highlight role, which on
+    Windows is the user's system accent — whatever colour they picked shows up
+    behind the stage-coloured progress bars and fights them. The app paints its
+    own surfaces everywhere else, so it has to own this one too.
+    """
+    from PySide6.QtGui import QPalette
+
+    pal = app.palette()
+    pal.setColor(QPalette.Highlight, QColor(C.surface_hi))
+    pal.setColor(QPalette.HighlightedText, QColor(C.text))
+    # AlternateBase comes off the Windows theme too — it was painting every
+    # second row of the file lists in the user's system accent colour
+    pal.setColor(QPalette.AlternateBase, QColor(C.surface))
+    app.setPalette(pal)
+
+
 def muted_css() -> str:
     return f"color: {C.muted};"
 
@@ -187,12 +206,16 @@ def stylesheet() -> str:
         border: none;
         gridline-color: transparent;
         outline: none;
+        /* a selected row sits directly under the stage-coloured progress bar,
+           so it has to stay quieter than the accent */
+        selection-background-color: {C.surface_hi};
+        selection-color: {C.text};
     }}
     QTableWidget::item {{
         padding: 8px 6px;
         border-bottom: 1px solid {C.line};
     }}
-    QTableWidget::item:selected {{ background: {C.surface}; color: {C.text}; }}
+    QTableWidget::item:selected {{ background: {C.surface_hi}; color: {C.text}; }}
     QHeaderView::section {{
         background: transparent;
         color: {C.faint};
@@ -241,32 +264,12 @@ def stylesheet() -> str:
     QSpinBox::up-button, QSpinBox::down-button {{ width: 0; border: none; }}
     QSpinBox {{ padding-right: 9px; }}
 
+    /* Checkboxes are left to Fusion on purpose. Styling ::indicator replaces
+       the whole thing, including the tick, and a checked box became a filled
+       square that differed from an empty one by colour alone — the one cue a
+       colour-blind reader does not get, on the control that decides which
+       files get converted. */
     QCheckBox {{ spacing: {S.sm}px; }}
-    QCheckBox::indicator {{
-        width: 16px; height: 16px;
-        border: 1px solid {C.faint};
-        border-radius: {R.sm}px;
-        background: {C.surface};
-    }}
-    QCheckBox::indicator:checked {{
-        background: {C.accent};
-        border-color: {C.accent};
-        image: none;
-    }}
-    QCheckBox::indicator:hover {{ border-color: {C.accent}; }}
-
-    /* checkboxes drawn inside table cells are a different primitive */
-    QTableView::indicator {{
-        width: 15px; height: 15px;
-        border: 1px solid {C.faint};
-        border-radius: {R.sm}px;
-        background: {C.surface};
-    }}
-    QTableView::indicator:checked {{
-        background: {C.accent};
-        border-color: {C.accent};
-    }}
-    QTableView::indicator:hover {{ border-color: {C.accent}; }}
 
     QListWidget {{
         background: {C.surface}; border: 1px solid {C.line};

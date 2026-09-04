@@ -238,7 +238,12 @@ class Pipeline:
             if self.should_stop():
                 self._log("stop requested — saving progress")
                 self._persist_resume()
-                self.emit("finished", {"ok": False, "error": "stopped"})
+                # the episodes already finished still count — the screen says so
+                self.emit("finished", {
+                    "ok": False, "error": "stopped",
+                    "done": sum(1 for e in state.episodes if e.status == "done"),
+                    "total": len(state.episodes),
+                    "output_dir": str(self._out_dir())})
                 return
             self._process_episode(ep)
 

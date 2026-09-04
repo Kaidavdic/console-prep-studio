@@ -17,13 +17,19 @@ from PySide6.QtWidgets import (
 
 from ..core import ffmpeg_setup, settings
 from ..core.local_job import LocalJobConfig, find_videos
-from .common import human_bytes, human_eta
+from .common import (
+    confirm_deleting_sources, count_of, human_bytes, human_eta, plain_error,
+)
+
+
+def _files(n: int) -> str:
+    return count_of(n, "file")
 from .progress_delegate import ProgressDelegate, set_progress
 from .style import muted_css
 from .worker import LocalJobWorker, retire_on_finish
 
-_CHK, _EP, _NAME, _SIZE, _PROG, _LEFT = range(6)
-_HEADERS = ["", "#", "File", "Size", "Progress", "Left"]
+_CHK, _EP, _NAME, _SIZE, _PROG, _LEFT, _RESULT = range(7)
+_HEADERS = ["", "#", "File", "Size", "Progress", "Left", "What happened"]
 
 
 class ConvertTab(QWidget):
@@ -73,6 +79,8 @@ class ConvertTab(QWidget):
         self.none_btn.clicked.connect(lambda: self._check_all(False))
         self.rescan_btn = QPushButton("Refresh")
         self.rescan_btn.clicked.connect(self._scan)
+        self.open_btn = QPushButton("Open output folder")
+        self.open_btn.clicked.connect(self._open_output)
         btns = QHBoxLayout()
         btns.addWidget(self.start_btn)
         btns.addWidget(self.stop_btn)
@@ -80,6 +88,7 @@ class ConvertTab(QWidget):
         btns.addWidget(self.all_btn)
         btns.addWidget(self.none_btn)
         btns.addStretch(1)
+        btns.addWidget(self.open_btn)
         btns.addWidget(self.rescan_btn)
 
         self.summary = self._build_summary()
@@ -89,7 +98,8 @@ class ConvertTab(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setAlternatingRowColors(True)
+        # no zebra striping: rows are separated by a hairline, and a second row
+        # colour competes with the stage colour the progress bar is carrying
         self.table.setShowGrid(False)
         self.table.setItemDelegateForColumn(_PROG, ProgressDelegate(self.table))
         self.table.itemChanged.connect(self._on_item_changed)
@@ -102,6 +112,8 @@ class ConvertTab(QWidget):
         head.setSectionResizeMode(_PROG, QHeaderView.Fixed)
         self.table.setColumnWidth(_PROG, 190)
         head.setSectionResizeMode(_LEFT, QHeaderView.ResizeToContents)
+        head.setSectionResizeMode(_RESULT, QHeaderView.Fixed)
+        self.table.setColumnWidth(_RESULT, 280)
 
         self.empty_hint = QLabel()
         self.empty_hint.setWordWrap(True)
@@ -115,7 +127,7 @@ class ConvertTab(QWidget):
         lay.addWidget(self.delete_source)
         lay.addLayout(btns)
         lay.addWidget(self.summary)
-        lay.addWidget(self.empty_hint)
+        lay.addWidget(self.empty_hint, 1)     # takes the slack while the list is empty
         lay.addWidget(self.table, 1)
 
         self.main.profilesChanged.connect(self._reload_profiles)
@@ -193,6 +205,13 @@ class ConvertTab(QWidget):
         if d:
             target.setText(d)
 
+    def _open_output(self) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        out = Path(self.out_dir.text())
+        out.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(out)))
+
     # -- listing --------------------------------------------------------
     def _scan(self) -> None:
         if self.worker:
@@ -235,14 +254,24 @@ class ConvertTab(QWidget):
             cell = QTableWidgetItem("")
             cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.table.setItem(row, _LEFT, cell)
+            self.table.setItem(row, _RESULT, QTableWidgetItem(""))
         self.table.blockSignals(False)
 
         has = bool(self._files)
         self.table.setVisible(has)
         self.empty_hint.setVisible(not has)
-        self.empty_hint.setText(
-            f"No video files in {self.folder.text() or 'that folder'}.\n"
-            "Pick a folder that has some, or turn on Include subfolders.")
+        typed = self.folder.text().strip()
+        if not typed:
+            self.empty_hint.setText(
+                "Choose the folder your videos are in — press Browse…")
+        elif not Path(typed).is_dir():
+            self.empty_hint.setText(
+                "That folder isn't there any more.\n"
+                "Press Browse… and pick one that is.")
+        elif not has:
+            self.empty_hint.setText(
+                f"There are no videos in “{Path(typed).name}”.\n"
+                "Pick a different folder, or tick Include subfolders to look inside it.")
         self._update_selection()
 
     def _checked_rows(self) -> list[int]:
@@ -261,6 +290,9 @@ class ConvertTab(QWidget):
         rows = self._checked_rows()
         total = sum(self._files[r].stat().st_size for r in rows)
         self.title.setText("Ready to convert" if rows else "Nothing selected")
+        # nothing to convert means nothing to press: better than a button that
+        # answers with a dialog explaining why it did nothing
+        self.start_btn.setEnabled(bool(rows) and self.worker is None)
         self.bar.setValue(0)
         self.count.setText(f"{len(rows)} of {len(self._files)} files")
         self.bytes.setText(human_bytes(total))
@@ -286,12 +318,10 @@ class ConvertTab(QWidget):
             from .ffmpeg_dialog import ensure_ffmpeg
             if not ensure_ffmpeg(self):
                 return
-        if self.delete_source.isChecked():
-            if QMessageBox.question(
-                    self, "Delete the originals?",
-                    f"{len(rows)} source file(s) will be deleted after they convert.\n"
-                    "This cannot be undone.") != QMessageBox.Yes:
-                return
+        if self.delete_source.isChecked() and not confirm_deleting_sources(
+                self, len(rows), "video file you picked",
+                "of the video files you picked"):
+            return
 
         cfg = LocalJobConfig(
             files=[self._files[r] for r in rows],
@@ -311,6 +341,8 @@ class ConvertTab(QWidget):
         self.table.blockSignals(False)
         self.table.viewport().update()
         self._set_running(True)
+        self.title.setText(f"Converting {_files(len(rows))}…")
+        self.bar.setValue(0)
 
         self.worker = LocalJobWorker(cfg, parent=self)
         w = self.worker
@@ -333,7 +365,7 @@ class ConvertTab(QWidget):
             self.stop_btn.setEnabled(False)
 
     def _set_running(self, running: bool) -> None:
-        self.start_btn.setEnabled(not running)
+        self.start_btn.setEnabled(not running and bool(self._checked_rows()))
         self.stop_btn.setEnabled(running)
         for w in (self.folder, self.profile, self.out_dir, self.recursive, self.rename,
                   self.delete_source, self.all_btn, self.none_btn, self.rescan_btn):
@@ -358,9 +390,14 @@ class ConvertTab(QWidget):
         if e["status"] == "done":
             set_progress(self.table.item(r, _PROG), 1.0, "done", "Done")
             self.table.item(r, _LEFT).setText("")
+            self.table.item(r, _RESULT).setText("")
         elif e["status"] == "error":
             set_progress(self.table.item(r, _PROG), 0.0, "error", "Failed")
-            self.table.item(r, _NAME).setToolTip(e.get("error", ""))
+            self.table.item(r, _LEFT).setText("")
+            why = plain_error(e.get("error", ""))
+            cell = self.table.item(r, _RESULT)
+            cell.setText(why)
+            cell.setToolTip(why)          # the raw reason stays in the Log
         self.table.viewport().update()
 
     def _enc_progress(self, p: dict) -> None:
@@ -377,6 +414,9 @@ class ConvertTab(QWidget):
         self.count.setText(f"{p['episodes_done']} of {p['episodes_total']} done")
         eta = p.get("eta_seconds", 0)
         self.left.setText(f"about {human_eta(eta)} left" if eta > 0 else "")
+        if self.worker is not None:
+            self.title.setText(
+                f"Converting — {p['episodes_done']} of {p['episodes_total']} done")
 
     def _finished(self, payload: dict) -> None:
         self._set_running(False)
@@ -386,9 +426,30 @@ class ConvertTab(QWidget):
             if item:
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         self.table.blockSignals(False)
-        if payload.get("ok"):
-            self.title.setText(f"Converted {payload.get('done', 0)} files")
-            self.bar.setValue(1000)
-            self.left.setText("")
+        done = payload.get("done", 0)
+        total = payload.get("total", len(self._selected_rows_at_start))
+        failed = max(0, total - done)
+        self.left.setText("")
+        self.bar.setValue(int(done / total * 1000) if total else 0)
+
+        if payload.get("error") == "stopped":
+            # the user pressed Stop; that is not a failure
+            self.title.setText(f"Stopped — {_files(done)} converted")
+        elif not payload.get("ok"):
+            self.title.setText("Could not convert these files")
+            QMessageBox.warning(self, "Conversion stopped",
+                                plain_error(payload.get("error", "")))
+        elif failed:
+            self.title.setText(
+                f"Converted {done} of {total} — {failed} could not be converted")
+            if done == 0:
+                body = ("That file could not be converted." if total == 1
+                        else f"None of the {total} files could be converted.")
+            else:
+                body = f"{_files(done)} converted, out of {total}."
+            body += ("\n\nThe reason is beside it in the list." if failed == 1
+                     else "\n\nThe reason is beside each one in the list.")
+            QMessageBox.warning(self, "Some files could not be converted", body)
         else:
-            self.title.setText(f"Stopped — {payload.get('error', 'unknown reason')}")
+            self.title.setText(f"Converted {_files(done)} — ready to send")
+            self.bar.setValue(1000)

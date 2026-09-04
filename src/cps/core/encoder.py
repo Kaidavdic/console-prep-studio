@@ -92,7 +92,8 @@ def burnin_safe_source(src: Path) -> Iterator[tuple[Path, str]]:
 
 
 def _run(cmd: list[str], duration: float, cwd: Path | None,
-         on_progress: ProgressCb | None) -> tuple[int, str]:
+         on_progress: ProgressCb | None,
+         should_stop: Callable[[], bool] | None = None) -> tuple[int, str]:
     proc = subprocess.Popen(
         cmd, cwd=str(cwd) if cwd else None,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
@@ -103,6 +104,10 @@ def _run(cmd: list[str], duration: float, cwd: Path | None,
     fps = 0.0
     assert proc.stdout is not None
     for line in proc.stdout:
+        if should_stop is not None and should_stop():
+            # a Cancel button that leaves ffmpeg running is not a Cancel button
+            proc.kill()
+            break
         tail.append(line)
         if len(tail) > 40:
             tail.pop(0)
@@ -127,7 +132,8 @@ def _run(cmd: list[str], duration: float, cwd: Path | None,
 
 
 def build_soft_cmd(src: Path, out: Path, c: Compression, probe: Probe,
-                   audio: Stream | None, sub: Stream | None) -> list[str]:
+                   audio: Stream | None, sub: Stream | None,
+                   limit_seconds: float | None = None) -> list[str]:
     exe = ffmpeg_setup.ffmpeg_path()
     cmd = [str(exe), "-y", "-hide_banner", "-nostdin", "-i", str(src),
            "-map", "0:v:0"]
@@ -144,12 +150,15 @@ def build_soft_cmd(src: Path, out: Path, c: Compression, probe: Probe,
     if audio is not None:
         cmd += ["-metadata:s:a:0", f"language={audio.language or 'und'}",
                 "-disposition:a:0", "default"]
+    if limit_seconds:
+        cmd += ["-t", str(limit_seconds)]
     cmd += ["-progress", "pipe:1", str(out)]
     return cmd
 
 
 def build_burnin_cmd(cwd_name: str, out: Path, c: Compression, probe: Probe,
-                     audio: Stream | None, sub_si: int) -> list[str]:
+                     audio: Stream | None, sub_si: int,
+                     limit_seconds: float | None = None) -> list[str]:
     exe = ffmpeg_setup.ffmpeg_path()
     cmd = [str(exe), "-y", "-hide_banner", "-nostdin", "-i", cwd_name,
            "-map", "0:v:0"]
@@ -161,31 +170,46 @@ def build_burnin_cmd(cwd_name: str, out: Path, c: Compression, probe: Probe,
     cmd += ["-c:a", c.acodec, "-b:a", c.abitrate, "-ac", str(c.achannels)]
     if audio is not None:
         cmd += ["-metadata:s:a:0", f"language={audio.language or 'und'}"]
+    if limit_seconds:
+        cmd += ["-t", str(limit_seconds)]
     cmd += ["-movflags", "+faststart", "-progress", "pipe:1", str(out)]
     return cmd
 
 
+def _progress_span(probe: Probe, limit_seconds: float | None) -> float:
+    """How much video will actually be written — what progress is measured against."""
+    if limit_seconds:
+        return min(probe.duration, limit_seconds) or limit_seconds
+    return probe.duration
+
+
 def encode_soft(src: Path, out_dir: Path, title: str, c: Compression, probe: Probe,
-                on_progress: ProgressCb | None = None) -> EncodeResult:
+                on_progress: ProgressCb | None = None,
+                should_stop: Callable[[], bool] | None = None,
+                limit_seconds: float | None = None) -> EncodeResult:
     audio = probe.choose_audio(c)
     sub = probe.choose_subtitle(c) if c.sub_mode in ("soft", "both") else None
     out = out_dir / f"{title}.{c.container_soft}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    cmd = build_soft_cmd(src, out, c, probe, audio, sub)
-    rc, tail = _run(cmd, probe.duration, None, on_progress)
+    cmd = build_soft_cmd(src, out, c, probe, audio, sub, limit_seconds)
+    rc, tail = _run(cmd, _progress_span(probe, limit_seconds), None, on_progress,
+                    should_stop)
     return EncodeResult("soft", out, rc == 0 and out.is_file() and out.stat().st_size > 0, tail)
 
 
 def encode_burnin(src: Path, out_dir: Path, title: str, c: Compression, probe: Probe,
-                  on_progress: ProgressCb | None = None) -> EncodeResult:
+                  on_progress: ProgressCb | None = None,
+                  should_stop: Callable[[], bool] | None = None,
+                  limit_seconds: float | None = None) -> EncodeResult:
     audio = probe.choose_audio(c)
     sub = probe.choose_subtitle(c)
     si = sub.type_index if sub is not None else 0
     out = out_dir / f"{title} [burned-in subs].mp4"
     out_dir.mkdir(parents=True, exist_ok=True)
     with burnin_safe_source(src) as (cwd, fname):
-        cmd = build_burnin_cmd(fname, out, c, probe, audio, si)
-        rc, tail = _run(cmd, probe.duration, cwd, on_progress)
+        cmd = build_burnin_cmd(fname, out, c, probe, audio, si, limit_seconds)
+        rc, tail = _run(cmd, _progress_span(probe, limit_seconds), cwd, on_progress,
+                        should_stop)
     return EncodeResult("burn-in", out, rc == 0 and out.is_file() and out.stat().st_size > 0, tail)
 
 

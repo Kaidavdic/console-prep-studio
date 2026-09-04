@@ -87,7 +87,12 @@ class LocalJob:
 
         for ep in self.episodes:
             if self.should_stop():
-                self.emit("finished", {"ok": False, "error": "stopped"})
+                # the work already finished still counts — the screen says so
+                self.emit("finished", {
+                    "ok": False, "error": "stopped",
+                    "done": sum(1 for e in self.episodes if e.status == "done"),
+                    "total": len(self.episodes),
+                    "output_dir": str(self._out_dir())})
                 return
             self._convert(ep)
 

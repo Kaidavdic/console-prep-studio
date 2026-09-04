@@ -74,7 +74,7 @@ class SendTab(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setAlternatingRowColors(True)
+        # matches the other two lists: hairline separators, no second row colour
         self.table.setShowGrid(False)
         self.table.setItemDelegateForColumn(_PROG, ProgressDelegate(self.table))
         self.table.itemChanged.connect(self._on_item_changed)
@@ -96,7 +96,7 @@ class SendTab(QWidget):
         lay.addLayout(top)
         lay.addLayout(btns)
         lay.addWidget(self.summary)
-        lay.addWidget(self.empty_hint)
+        lay.addWidget(self.empty_hint, 1)     # takes the slack while the list is empty
         lay.addWidget(self.table, 1)
 
         self.main.profilesChanged.connect(self._reload_profiles)
@@ -190,9 +190,16 @@ class SendTab(QWidget):
         has = bool(self._paths)
         self.table.setVisible(has)
         self.empty_hint.setVisible(not has)
-        self.empty_hint.setText(
-            f"No video files in {self.folder.text()}.\n"
-            "Run a job on the Download tab first, or point this at another folder.")
+        typed = self.folder.text().strip()
+        if typed and not Path(typed).is_dir():
+            self.empty_hint.setText("That folder isn't there any more.\n"
+                                    "Press Browse… and pick one that is.")
+        else:
+            self.empty_hint.setText(
+                "Nothing converted yet.\n"
+                "Convert some videos first — “From a torrent” or “From a folder” "
+                "at the top of this screen — or press Browse… to send from "
+                "somewhere else.")
         self._update_selection_summary()
 
     def _checked_rows(self) -> list[int]:

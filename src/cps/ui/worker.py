@@ -166,6 +166,72 @@ class LocalJobWorker(_Worker):
         self.finished_job.emit({"ok": False, "error": str(exc)})
 
 
+class SampleWorker(_Worker):
+    """One minute of a real file, converted with the current settings.
+
+    The settings screen used to do this inside the click handler, which froze
+    the window for as long as the encode took — and it encoded the whole file
+    rather than a sample, so on a DVD-sized episode that was minutes.
+    """
+    progress = Signal(float)
+    done = Signal(bool, str)          # ok, message (empty message = cancelled)
+
+    SAMPLE_SECONDS = 60.0
+
+    def __init__(self, src, out_dir, compression, parent=None):
+        super().__init__(parent)
+        self.src = src
+        self.out_dir = out_dir
+        self.c = compression
+        self._stop = threading.Event()
+
+    def request_stop(self) -> None:
+        self._stop.set()
+
+    def work(self) -> None:
+        from ..core import encoder, ffprobe
+
+        try:
+            probe = ffprobe.probe(self.src)
+        except Exception as e:  # noqa: BLE001
+            self.done.emit(False, f"could not read the file: {e}")
+            return
+
+        full_seconds = probe.duration or 0.0
+        encode = (encoder.encode_soft if self.c.sub_mode in ("soft", "both")
+                  else encoder.encode_burnin)
+        result = encode(self.src, self.out_dir, "SAMPLE", self.c, probe,
+                        lambda p: self.progress.emit(p.get("fraction", 0.0)),
+                        self._stop.is_set, self.SAMPLE_SECONDS)
+
+        if self._stop.is_set():
+            self.done.emit(False, "")
+            return
+        if not result.ok:
+            self.done.emit(False, f"{result.mode}: ffmpeg failed")
+            return
+        self.done.emit(True, self._verdict(result, full_seconds))
+
+    def _verdict(self, result, full_seconds: float) -> str:
+        """Say what this means for a whole episode, not just the sample."""
+        from .common import human_bytes, human_duration
+
+        sample_bytes = result.output.stat().st_size
+        sampled = min(self.SAMPLE_SECONDS, full_seconds or self.SAMPLE_SECONDS)
+        lines = [f"A {human_duration(sampled)} sample came out at "
+                 f"{human_bytes(sample_bytes)}."]
+        if full_seconds > sampled > 0:
+            whole = sample_bytes * full_seconds / sampled
+            lines.append(f"At that rate the whole {human_duration(full_seconds)} "
+                         f"video would be about {human_bytes(whole)}.")
+        lines.append("\nPlay it to check how it looks — it is in the app's "
+                     "“sample” folder.")
+        return "\n".join(lines)
+
+    def on_crash(self, exc: Exception) -> None:
+        self.done.emit(False, str(exc))
+
+
 class SendWorker(_Worker):
     event = Signal(str, dict)
     done = Signal(list)

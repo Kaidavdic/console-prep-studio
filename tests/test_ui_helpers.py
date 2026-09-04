@@ -125,6 +125,54 @@ def test_faint_text_clears_the_large_text_threshold():
     assert contrast_ratio(QColor(C.faint), QColor(C.bg)) >= 3.0
 
 
+# --- plain language in front of the user ----------------------------------
+
+def test_plain_error_never_shows_a_command_line():
+    """The reason a file failed reaches a QMessageBox and a table cell, so it
+    must never be the raw CalledProcessError with the ffprobe argv in it."""
+    from cps.ui.common import plain_error
+
+    raw = ("could not read the file: Command '['C:\\\\ffmpeg\\\\ffprobe.EXE', "
+           "'-v', 'error', 'D:\\\\media\\\\ep01.mkv']' returned non-zero exit status 1.")
+    said = plain_error(raw)
+    assert said == "This file is damaged, or it is not a video."
+    for leak in ("Command", "ffprobe", ".EXE", "exit status", "\\"):
+        assert leak not in said
+
+    assert plain_error("") == "Something went wrong."
+    # an unrecognised message that still names a path is not shown verbatim
+    assert "C:\\" not in plain_error("boom while writing C:\\some\\path\\out.mkv")
+
+
+def test_count_of_never_says_one_files():
+    from cps.ui.common import count_of
+
+    assert count_of(1, "file") == "1 file"
+    assert count_of(0, "file") == "0 files"
+    assert count_of(3, "episode") == "3 episodes"
+
+
+def test_closing_the_delete_prompt_keeps_the_files():
+    """Esc and the window's X leave clickedButton() as None. That has to mean
+    'keep' — reading it as 'not the keep button' deletes the user's files."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    from cps.ui.common import confirm_deleting_sources
+
+    app = QApplication.instance() or QApplication([])
+
+    def close_the_box():
+        for w in app.topLevelWidgets():
+            if isinstance(w, QMessageBox) and w.isVisible():
+                w.reject()                      # what Esc / the X do
+
+    QTimer.singleShot(50, close_the_box)
+    assert confirm_deleting_sources(None, 3, "file", "files") is False
+
+
 def test_accent_button_label_is_readable():
     """White on the accent is text, so 4.5:1. The accent as a filled shape on
     the background is a non-text element, so 3:1 applies there."""

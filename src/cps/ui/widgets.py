@@ -43,6 +43,14 @@ def ghost(text: str) -> QPushButton:
     return b
 
 
+def set_kind(button: QPushButton, kind: str) -> None:
+    """Restyle a button after the fact — Qt only re-reads a style property on
+    an explicit unpolish/polish."""
+    button.setProperty("kind", kind)
+    button.style().unpolish(button)
+    button.style().polish(button)
+
+
 class Card(QFrame):
     """A raised surface with a hairline. No shadow — shadows on every panel is
     the generic look, and here elevation only needs to say 'this is the input'."""
@@ -57,7 +65,12 @@ class Card(QFrame):
 class CommandBar(Card):
     """The hero. One big field that takes a magnet link or a dropped .torrent,
     with the device it will prepare for sitting inside it rather than in a
-    separate form row."""
+    separate form row.
+
+    The button matters: pressing Enter used to be the only way to read a link,
+    which is invisible. The button says what happens next, and Enter still works
+    for anyone who expects it.
+    """
 
     submitted = Signal()
     fileDropped = Signal(str)
@@ -66,10 +79,6 @@ class CommandBar(Card):
         super().__init__(parent=parent)
         self.setAcceptDrops(True)
         self.setMinimumHeight(92)
-
-        self.icon = QLabel("⌘")
-        self.icon.setStyleSheet(
-            f"color: {C.faint}; font-size: 19px; background: transparent; border: none;")
 
         self.field = QLineEdit()
         self.field.setProperty("kind", "hero")
@@ -87,14 +96,22 @@ class CommandBar(Card):
             f" border-radius: {R.pill}px; padding: 5px 12px; color: {C.text}; }}"
             f"QComboBox::drop-down {{ border: none; width: 18px; }}")
 
+        self.load_btn = primary("Load this torrent")
+        self.load_btn.setEnabled(False)
+        self.load_btn.setDefault(True)
+        self.load_btn.clicked.connect(self.submitted)
+        self.field.textChanged.connect(
+            lambda t: self.load_btn.setEnabled(bool(t.strip())))
+
         self.hint = QLabel()
+        self.hint.setWordWrap(True)
         self.hint.setStyleSheet(
             f"color: {C.faint}; background: transparent; border: none;")
 
         top = QHBoxLayout()
         top.setSpacing(S.md)
-        top.addWidget(self.icon)
         top.addWidget(self.field, 1)
+        top.addWidget(self.load_btn)
 
         for_lbl = muted("for")
         for_lbl.setStyleSheet(

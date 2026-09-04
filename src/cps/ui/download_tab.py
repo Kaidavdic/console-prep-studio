@@ -13,22 +13,39 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QFileDialog, QFormLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMessageBox, QSpinBox, QStackedWidget,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QHeaderView, QLabel, QLineEdit, QMessageBox, QSizePolicy, QSpinBox,
+    QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..core import ffmpeg_setup, settings
 from ..core.pipeline import JobConfig
-from .common import human_bytes, human_eta, human_rate
+from .common import (
+    confirm_deleting_sources, count_of, human_bytes, human_eta, human_rate,
+    plain_error,
+)
+
+
+def _eps(n: int) -> str:
+    return count_of(n, "episode")
 from .progress_delegate import ProgressDelegate, set_progress
 from .theme import C, S
 from .widgets import (
-    CommandBar, Disclosure, JobStatus, ghost, muted, primary,
+    CommandBar, Disclosure, JobStatus, ghost, muted, primary, set_kind,
 )
 from .worker import MetadataWorker, PipelineWorker, SendWorker, retire_on_finish
 
 _CHK, _EP, _NAME, _SIZE, _PROG, _SPEED, _LEFT = range(7)
 _HEADERS = ["", "#", "Name", "Size", "Progress", "Speed", "Left"]
+
+# The first thing anyone sees, so it says what the app is before it asks for
+# anything. A blank panel with one placeholder line left people guessing.
+_INTRO = (
+    "<div style='line-height: 150%'>"
+    "<b>Console Prep Studio shrinks video so it plays on your handheld.</b><br><br>"
+    "Paste a magnet link in the box above and press <b>Load this torrent</b>,<br>"
+    "or drag a .torrent file onto it.<br><br>"
+    "Already have the videos on this computer? Use <b>From a folder</b> at the top."
+    "</div>")
 
 
 class DownloadTab(QWidget):
@@ -40,6 +57,7 @@ class DownloadTab(QWidget):
         self.send_worker: SendWorker | None = None
         self._files: list = []
         self._row_by_fidx: dict[int, int] = {}
+        self._failures: list[tuple[str, str]] = []
 
         # ---- hero: the command bar, or the running job ----
         self.bar = CommandBar("Paste a magnet link, or drop a .torrent file here")
@@ -53,6 +71,9 @@ class DownloadTab(QWidget):
         self.hero = QStackedWidget()
         self.hero.addWidget(self.bar)
         self.hero.addWidget(self.status)
+        # hug the bar's own height: left to expand, it swallowed the whole
+        # window and the first screen became an empty box
+        self.hero.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
 
         # ---- options: everything you set once ----
         self.opts = Disclosure("Options")
@@ -62,8 +83,7 @@ class DownloadTab(QWidget):
         self.limit.setSpecialValueText("no limit")
         self.port = QSpinBox(); self.port.setRange(1024, 65535); self.port.setValue(6881)
         self.delete_source = QCheckBox(
-            "Delete each source file once it has been converted")
-        self.delete_source.setChecked(True)
+            "Delete each downloaded file after it converts, to save disk space")
         self.delete_source.toggled.connect(self._delete_hint)
         self.autosend = QCheckBox("Send to the device when the job finishes")
 
@@ -85,7 +105,7 @@ class DownloadTab(QWidget):
         self.opts.add_layout(form)
         self.opts.add(self.delete_source)
         self.opts.add(self.autosend)
-        self._delete_hint(True)
+        self._delete_hint(self.delete_source.isChecked())
 
         # ---- the list, and the few controls that belong to it ----
         self.count = muted("")
@@ -104,11 +124,10 @@ class DownloadTab(QWidget):
         self.pick_row.setVisible(False)
 
         self.table = self._build_table()
-        self.empty = QLabel(
-            "Paste a magnet link above, or drop a .torrent file onto it.")
+        self.empty = QLabel(_INTRO)
         self.empty.setAlignment(Qt.AlignCenter)
         self.empty.setWordWrap(True)
-        self.empty.setStyleSheet(f"color: {C.faint}; padding: 48px;")
+        self.empty.setStyleSheet(f"color: {C.muted}; padding: 32px;")
 
         # ---- one primary action ----
         self.start_btn = primary("Start")
@@ -131,7 +150,7 @@ class DownloadTab(QWidget):
         lay.addWidget(self.hero)
         lay.addWidget(self.opts)
         lay.addWidget(self.pick_row)
-        lay.addWidget(self.empty)
+        lay.addWidget(self.empty, 1)
         lay.addWidget(self.table, 1)
         lay.addLayout(actions)
 
@@ -200,7 +219,8 @@ class DownloadTab(QWidget):
 
     def _delete_hint(self, on: bool) -> None:
         self.opts.set_summary(
-            "one file on disk at a time" if on else "sources kept for seeding")
+            "downloads are deleted after converting"
+            if on else "downloads are kept")
 
     def _pick_dir(self, target: QLineEdit) -> None:
         d = QFileDialog.getExistingDirectory(self, "Choose a folder", target.text())
@@ -222,8 +242,9 @@ class DownloadTab(QWidget):
         self.table.setVisible(False)
         self.pick_row.setVisible(False)
         self.empty.setVisible(True)
-        self.empty.setText("Paste a magnet link above, or drop a .torrent file onto it.")
+        self.empty.setText(_INTRO)
         self.start_btn.setEnabled(False)
+        set_kind(self.bar.load_btn, "primary")
         self.bar.hint.setText("")
 
     # -- reading the torrent -------------------------------------------
@@ -232,10 +253,12 @@ class DownloadTab(QWidget):
         if not src:
             return
         if not src.startswith("magnet:") and not Path(src).is_file():
-            self.bar.hint.setText("That file does not exist")
+            self.bar.hint.setText(
+                "That is not a magnet link. Paste a link starting with “magnet:”, "
+                "or drag a .torrent file onto the box.")
             return
         self.bar.hint.setText("Reading the torrent…")
-        self.empty.setText("Reading the torrent…")
+        self.empty.setText("Reading the torrent…\nThis can take a minute.")
         self.meta_worker = MetadataWorker(src, port=self.port.value(),
                                           regex=self.main.current_profile().episode_regex,
                                           parent=self)
@@ -256,6 +279,8 @@ class DownloadTab(QWidget):
         self._files = files
         self._row_by_fidx = {f.index: row for row, f in enumerate(files)}
         self.bar.hint.setText("")
+        # the torrent is read; Start is the action that matters now
+        set_kind(self.bar.load_btn, "ghost")
 
         self.table.blockSignals(True)
         self.table.setRowCount(len(files))
@@ -342,6 +367,9 @@ class DownloadTab(QWidget):
             from .ffmpeg_dialog import ensure_ffmpeg
             if not ensure_ffmpeg(self):
                 return
+        if self.delete_source.isChecked() and not confirm_deleting_sources(
+                self, len(rows), "downloaded file", "downloaded files"):
+            return
 
         cfg = JobConfig(
             source=self.source.text().strip(),
@@ -364,8 +392,10 @@ class DownloadTab(QWidget):
         self.table.blockSignals(False)
         self.table.viewport().update()
 
+        self._failures = []
         self.status.title.setText(self._torrent_name())
         self.status.set_fraction(0.0)
+        self.status.set_accent(C.accent)
         self.hero.setCurrentWidget(self.status)
         self._set_running(True)
 
@@ -437,8 +467,11 @@ class DownloadTab(QWidget):
         if status == "done":
             self._set_row(row, 1.0, "done", "done")
         elif status == "error":
+            why = plain_error(e.get("error", ""))
             self._set_row(row, 0.0, "error", "failed")
-            self.table.item(row, _NAME).setToolTip(e.get("error", ""))
+            self.table.item(row, _NAME).setToolTip(why)
+            self._failures.append((Path(e.get("src_rel", "")).name
+                                   or e.get("title", "a file"), why))
         elif status == "downloading":
             self._set_row(row, 0.0, "downloading", "waiting")
 
@@ -489,19 +522,43 @@ class DownloadTab(QWidget):
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         self.table.blockSignals(False)
 
+        self.status.stats.set("speed", "—")
+        self.status.stats.set("time left", "—")
+        failed = len(self._failures)
+
         if payload.get("ok"):
             done = payload.get("done", 0)
-            self.status.title.setText(f"Finished — {done} episodes ready")
             self.status.set_fraction(1.0)
-            self.status.set_accent(C.done)
-            self.status.stats.set("speed", "—")
-            self.status.stats.set("time left", "—")
             self.main.log(f"output: {payload.get('output_dir', '')}")
+            if failed:
+                self.status.title.setText(
+                    f"Finished — {_eps(done)} ready, "
+                    f"{failed} could not be converted")
+                self.status.set_accent(C.error)
+                self._report_failures(done)
+            else:
+                self.status.title.setText(f"Finished — {_eps(done)} ready to send")
+                self.status.set_accent(C.done)
             if self.autosend.isChecked():
                 self._autosend(payload.get("output_dir") or self.out_dir.text())
+        elif payload.get("error") == "stopped":
+            self.status.title.setText(
+                f"Stopped — {_eps(payload.get('done', 0))} ready to send")
+            self.status.set_accent(C.queued)
         else:
-            self.status.title.setText(f"Stopped — {payload.get('error', 'unknown reason')}")
+            self.status.title.setText("Stopped — something went wrong")
             self.status.set_accent(C.error)
+            QMessageBox.warning(self, "The job stopped",
+                                plain_error(payload.get("error", "")))
+
+    def _report_failures(self, done: int) -> None:
+        listed = "\n".join(f"•  {name} — {why}" for name, why in self._failures[:8])
+        more = ("\n…and more; the Log has every one."
+                if len(self._failures) > 8 else "")
+        QMessageBox.warning(
+            self, "Some episodes could not be converted",
+            f"{_eps(done)} ready to send.\n\n"
+            f"These could not be converted:\n{listed}{more}")
 
     def _autosend(self, folder: str) -> None:
         self.main.log(f"Sending everything in {folder}")

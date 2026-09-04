@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from .theme import (  # noqa: F401
-    contrast_ratio, muted_css, stage_color, stage_of, stylesheet, text_on,
+    contrast_ratio, faint_css, muted_css, stage_color, stage_of, stylesheet,
+    text_on,
 )
 
 
