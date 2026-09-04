@@ -21,6 +21,37 @@ VERIFY_MODES = ("md5", "size", "none")
 
 
 @dataclass
+class TrackChoice:
+    """A track picked on one episode, to be found again on all the others.
+
+    Track order isn't guaranteed to be identical across a release, so pinning a
+    bare index is fragile. Remember what the track *was* — its title, language
+    and codec — and match on that first, falling back to the index only as a
+    last resort. `mode="auto"` means fall back to the profile's language
+    preference, which is the old behaviour.
+    """
+    mode: str = "auto"                 # auto | pinned
+    language: str = ""
+    title: str = ""
+    codec: str = ""
+    index: int = 0                     # index among tracks of this kind
+    channels: int | None = None
+
+    @property
+    def pinned(self) -> bool:
+        return self.mode == "pinned"
+
+    def describe(self) -> str:
+        if not self.pinned:
+            return "chosen automatically by language"
+        from .ffprobe import language_name
+        detail = ", ".join(b for b in (language_name(self.language),
+                                       self.codec.upper() if self.codec else "") if b)
+        name = self.title or f"track {self.index + 1}"
+        return f"{name} ({detail})" if detail else name
+
+
+@dataclass
 class Compression:
     width: int = 640
     height: int = 480
@@ -37,6 +68,9 @@ class Compression:
     sub_lang: str = "eng"
     sub_index: int | None = 0                  # index among subtitle streams; None = by lang
     container_soft: str = "mkv"
+    # tracks picked from a template episode; both default to automatic
+    audio_choice: TrackChoice = field(default_factory=TrackChoice)
+    sub_choice: TrackChoice = field(default_factory=TrackChoice)
 
 
 @dataclass
@@ -77,7 +111,13 @@ class Profile:
             fields = asdict(cls())
             return {**fields, **{k: v for k, v in src.items() if k in fields}}
 
-        comp = Compression(**_only(Compression, d.pop("compression", {})))
+        raw_comp = d.pop("compression", {})
+        comp = Compression(**_only(Compression, raw_comp))
+        # nested dataclasses come back as plain dicts from json
+        for attr in ("audio_choice", "sub_choice"):
+            val = getattr(comp, attr)
+            if isinstance(val, dict):
+                setattr(comp, attr, TrackChoice(**_only(TrackChoice, val)))
         tr = Transfer(**_only(Transfer, d.pop("transfer", {})))
         base = {k: d[k] for k in ("id", "name", "builtin", "episode_regex", "verify") if k in d}
         return Profile(compression=comp, transfer=tr, **base)

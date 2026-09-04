@@ -13,6 +13,7 @@ from .core import ffmpeg_setup, settings
 from .core.profiles import Profile, load_profiles, save_profiles
 from .ui import crashlog
 from .ui.compression_tab import CompressionTab
+from .ui.convert_tab import ConvertTab
 from .ui.download_tab import DownloadTab
 from .ui.ffmpeg_dialog import ensure_ffmpeg
 from .ui.log_tab import LogTab
@@ -37,10 +38,12 @@ class MainWindow(QMainWindow):
         self.profiles_tab = ProfilesTab(self)
         self.compression_tab = CompressionTab(self)
         self.download_tab = DownloadTab(self)
+        self.convert_tab = ConvertTab(self)
         self.send_tab = SendTab(self)
 
         tabs = QTabWidget()
         tabs.addTab(self.download_tab, "Download")
+        tabs.addTab(self.convert_tab, "Convert files")
         tabs.addTab(self.compression_tab, "Compression")
         tabs.addTab(self.profiles_tab, "Console Profiles")
         tabs.addTab(self.send_tab, "Send")
@@ -80,7 +83,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         """Ask running workers to stop and wait, so nothing is torn down mid-run."""
         workers = [self.download_tab.worker, self.download_tab.meta_worker,
-                   self.download_tab.send_worker, self.send_tab.worker]
+                   self.download_tab.send_worker, self.send_tab.worker,
+                   self.convert_tab.worker]
         live = [w for w in workers if w is not None and w.isRunning()]
         for w in live:
             if hasattr(w, "request_stop"):

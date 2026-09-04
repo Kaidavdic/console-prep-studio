@@ -167,8 +167,8 @@ def build_burnin_cmd(cwd_name: str, out: Path, c: Compression, probe: Probe,
 
 def encode_soft(src: Path, out_dir: Path, title: str, c: Compression, probe: Probe,
                 on_progress: ProgressCb | None = None) -> EncodeResult:
-    audio = probe.pick_audio(c.audio_lang_priority)
-    sub = probe.pick_subtitle(c.sub_lang, c.sub_index) if c.sub_mode in ("soft", "both") else None
+    audio = probe.choose_audio(c)
+    sub = probe.choose_subtitle(c) if c.sub_mode in ("soft", "both") else None
     out = out_dir / f"{title}.{c.container_soft}"
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = build_soft_cmd(src, out, c, probe, audio, sub)
@@ -178,8 +178,8 @@ def encode_soft(src: Path, out_dir: Path, title: str, c: Compression, probe: Pro
 
 def encode_burnin(src: Path, out_dir: Path, title: str, c: Compression, probe: Probe,
                   on_progress: ProgressCb | None = None) -> EncodeResult:
-    audio = probe.pick_audio(c.audio_lang_priority)
-    sub = probe.pick_subtitle(c.sub_lang, c.sub_index)
+    audio = probe.choose_audio(c)
+    sub = probe.choose_subtitle(c)
     si = sub.type_index if sub is not None else 0
     out = out_dir / f"{title} [burned-in subs].mp4"
     out_dir.mkdir(parents=True, exist_ok=True)

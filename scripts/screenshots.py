@@ -111,14 +111,34 @@ dl._job_progress({"episodes_done": 3, "episodes_total": 5,
 dl.job_title.setText("Dragon Ball V2 480p DBox DVD")
 shot(win, "02-running")
 
-# --- 3. compression settings ----------------------------------------------
-tabs.setCurrentWidget(win.compression_tab)
-shot(win, "03-compression")
+# --- 3. convert files already on disk --------------------------------------
+local = _APP / "existing" / "Cool Show"
+local.mkdir(parents=True, exist_ok=True)
+for n in range(1, 7):
+    with open(local / f"Cool.Show.{n:03d}.1080p.WEB-DL.mkv", "wb") as fh:
+        fh.truncate(int(1.8 * GB))
+cv = win.convert_tab
+cv.folder.setText(str(local))
+cv._scan()
+tabs.setCurrentWidget(cv)
+shot(win, "03-convert-local")
 
-# --- 4. console profiles ---------------------------------------------------
+# --- 4. compression settings + which tracks to use -------------------------
+comp = win.compression_tab
+prof = win.current_profile().compression
+from cps.core.profiles import TrackChoice  # noqa: E402
+prof.audio_choice = TrackChoice(mode="pinned", language="jpn", codec="flac",
+                                title="1986 Mono Broadcast Audio", index=1)
+prof.sub_choice = TrackChoice(mode="pinned", language="eng", codec="ass",
+                              title="Stylized Subtitles", index=0)
+comp._refresh_picks()
+tabs.setCurrentWidget(comp)
+shot(win, "04-compression")
+
+# --- 5. console profiles ---------------------------------------------------
 tabs.setCurrentWidget(win.profiles_tab)
 win.profiles_tab.list.setCurrentRow(0)
-shot(win, "04-profiles")
+shot(win, "05-profiles")
 
 # --- 5. send to the device -------------------------------------------------
 staged = _APP / "output" / "RG35XX H - KNULLI"
@@ -143,7 +163,7 @@ set_progress(st.table.item(3, 3), 0.55, "sending", "Sending 55%")
 st.title.setText("Sending to RG35XX H - KNULLI")
 st._update_live(int(0.55 * 164 * 1024 * 1024))
 tabs.setCurrentWidget(st)
-shot(win, "05-send")
+shot(win, "06-send")
 
 win.close()
 shutil.rmtree(_APP, ignore_errors=True)

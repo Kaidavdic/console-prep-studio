@@ -91,6 +91,40 @@ def cmd_prep(args) -> int:
     return 0
 
 
+def cmd_convert(args) -> int:
+    if not ffmpeg_setup.is_ready():
+        print("ffmpeg missing — run `cps ffmpeg` first.", file=sys.stderr)
+        return 2
+    profile = get_profile(args.profile)
+    if not profile:
+        print(f"no such profile: {args.profile}", file=sys.stderr)
+        return 2
+
+    from .core.local_job import LocalJob, LocalJobConfig, find_videos
+
+    files = find_videos(args.folder, not args.no_recursive)
+    if args.match:
+        import fnmatch
+        files = [f for f in files if fnmatch.fnmatch(f.name.lower(), args.match.lower())]
+    if not files:
+        print(f"no video files found in {args.folder}", file=sys.stderr)
+        return 1
+
+    print(f"{len(files)} file(s):")
+    for f in files:
+        print(f"  {f.name}")
+    if not args.yes:
+        if input("convert these? [y/N] ").strip().lower() not in ("y", "yes"):
+            return 0
+
+    out = Path(args.out or (settings.default_output_dir())).expanduser()
+    cfg = LocalJobConfig(files=files, output_root=out, profile=profile,
+                         delete_source=args.delete_source,
+                         rename_episodes=not args.keep_names)
+    LocalJob(cfg, _print_event, lambda: False).run()
+    return 0
+
+
 def cmd_send(args) -> int:
     profile = get_profile(args.profile)
     if not profile:
@@ -118,6 +152,19 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--port", type=int, default=6881)
     pr.add_argument("--metadata-timeout", type=float, default=180.0)
     pr.set_defaults(func=cmd_prep)
+
+    cv = sub.add_parser("convert", help="convert video files already on disk")
+    cv.add_argument("folder")
+    cv.add_argument("--profile", default="knulli-rg35xxh")
+    cv.add_argument("--out", help="where converted files go")
+    cv.add_argument("--match", help="only files matching this glob, e.g. '*S01*'")
+    cv.add_argument("--no-recursive", action="store_true", help="skip subfolders")
+    cv.add_argument("--keep-names", action="store_true",
+                    help="don't rename outputs to the detected episode titles")
+    cv.add_argument("--delete-source", action="store_true",
+                    help="delete each source file after it converts")
+    cv.add_argument("-y", "--yes", action="store_true", help="don't ask for confirmation")
+    cv.set_defaults(func=cmd_convert)
 
     sd = sub.add_parser("send", help="push a prepared folder to a device")
     sd.add_argument("folder")

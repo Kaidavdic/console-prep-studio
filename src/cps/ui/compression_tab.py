@@ -4,11 +4,12 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+    QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from ..core import ffmpeg_setup
+from .style import muted_css
 from ..core.profiles import FIT_MODES, SUB_MODES
 
 _PRESETS = ["ultrafast", "superfast", "veryfast", "faster", "fast",
@@ -65,6 +66,23 @@ class CompressionTab(QWidget):
         sf.addRow("Track index", self.sub_index)
         sf.addRow("Soft container", self.container)
 
+        # --- pick tracks off a real episode instead of guessing indexes ---
+        tbox = QGroupBox("Which tracks to use")
+        tf = QFormLayout(tbox)
+        self.tpl_btn = QPushButton("Choose from an episode…")
+        self.tpl_btn.clicked.connect(self._pick_tracks)
+        self.tpl_clear = QPushButton("Back to automatic")
+        self.tpl_clear.clicked.connect(self._clear_tracks)
+        self.audio_pick = QLabel()
+        self.sub_pick = QLabel()
+        tpl_row = QHBoxLayout()
+        tpl_row.addWidget(self.tpl_btn)
+        tpl_row.addWidget(self.tpl_clear)
+        tpl_row.addStretch(1)
+        tf.addRow("Audio track", self.audio_pick)
+        tf.addRow("Subtitle track", self.sub_pick)
+        tf.addRow("", self._wrap(tpl_row))
+
         self.save_btn = QPushButton("Save to profile")
         self.save_btn.clicked.connect(self._save)
         self.ff_btn = QPushButton("Locate / download ffmpeg")
@@ -79,16 +97,17 @@ class CompressionTab(QWidget):
         btnrow.addStretch(1)
         btnrow.addWidget(self.ff_btn)
 
-        self.hint = QLabel("These settings belong to the profile selected on the Download tab. "
-                           "Edits apply to the next run immediately; 'Save to profile' makes them stick.")
+        self.hint = QLabel("These settings belong to the device profile selected above. Edits take "
+                           "effect on the next run; Save to profile makes them stick.")
         self.hint.setWordWrap(True)
-        self.hint.setStyleSheet("color: gray;")
+        self.hint.setStyleSheet(muted_css())
 
         lay = QVBoxLayout(self)
         lay.addWidget(self.hint)
         lay.addWidget(vbox)
         lay.addWidget(abox)
         lay.addWidget(sbox)
+        lay.addWidget(tbox)
         lay.addLayout(btnrow)
         lay.addWidget(self.ff_label)
         lay.addStretch(1)
@@ -105,6 +124,7 @@ class CompressionTab(QWidget):
         self.main.profilesChanged.connect(self.load)
         self.load()
         self._refresh_ff_label()
+        self._refresh_picks()
 
     # ---------------------------------------------------------------
     @staticmethod
@@ -129,6 +149,8 @@ class CompressionTab(QWidget):
         self.sub_index.setValue(-1 if c.sub_index is None else c.sub_index)
         self.container.setCurrentText(c.container_soft)
         self._loading = False
+        if hasattr(self, 'audio_pick'):
+            self._refresh_picks()
 
     def _push(self) -> None:
         if self._loading:
@@ -148,6 +170,58 @@ class CompressionTab(QWidget):
         c.sub_lang = self.sub_lang.text().strip() or "eng"
         c.sub_index = None if self.sub_index.value() < 0 else self.sub_index.value()
         c.container_soft = self.container.currentText()
+
+    # -- track template ------------------------------------------------
+    def _refresh_picks(self) -> None:
+        c = self.main.current_profile().compression
+        self.audio_pick.setText(c.audio_choice.describe())
+        self.sub_pick.setText(c.sub_choice.describe())
+        self.tpl_clear.setEnabled(c.audio_choice.pinned or c.sub_choice.pinned)
+
+        # a pinned track overrides these fields, so don't leave them looking
+        # editable — two visible sources of truth is how people get confused
+        why = "A specific track is pinned under “Which tracks to use”, so this is ignored."
+        self.alang.setEnabled(not c.audio_choice.pinned)
+        self.alang.setToolTip(why if c.audio_choice.pinned else "")
+        for w in (self.sub_lang, self.sub_index):
+            w.setEnabled(not c.sub_choice.pinned)
+            w.setToolTip(why if c.sub_choice.pinned else "")
+
+    def _pick_tracks(self) -> None:
+        if not ffmpeg_setup.is_ready():
+            QMessageBox.warning(self, "ffmpeg needed",
+                                "Locate ffmpeg first — reading a file's tracks uses ffprobe.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open an episode to read its tracks", "",
+            "Video (*.mkv *.mp4 *.avi *.m4v *.mov *.ts)")
+        if not path:
+            return
+        from ..core import ffprobe
+        try:
+            pr = ffprobe.probe(path)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "Could not read that file", str(e))
+            return
+
+        from .track_dialog import TrackTemplateDialog
+        c = self.main.current_profile().compression
+        dlg = TrackTemplateDialog(pr, c, self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        c.audio_choice = dlg.audio_choice()
+        c.sub_choice = dlg.sub_choice()
+        self._refresh_picks()
+        self.main.log(f"tracks from {Path(path).name} — "
+                      f"audio: {c.audio_choice.describe()}, "
+                      f"subtitles: {c.sub_choice.describe()}")
+
+    def _clear_tracks(self) -> None:
+        from ..core.profiles import TrackChoice
+        c = self.main.current_profile().compression
+        c.audio_choice = TrackChoice()
+        c.sub_choice = TrackChoice()
+        self._refresh_picks()
 
     def _save(self) -> None:
         self._push()

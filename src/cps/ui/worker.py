@@ -125,6 +125,47 @@ class PipelineWorker(_Worker):
         self.finished_job.emit({"ok": False, "error": str(exc)})
 
 
+class LocalJobWorker(_Worker):
+    """Converts files already on disk. Same signals as PipelineWorker so the
+    Download and Convert tabs can share their progress handling."""
+    log = Signal(str)
+    episodes = Signal(list)
+    episode_update = Signal(dict)
+    encode_progress = Signal(dict)
+    job_progress = Signal(dict)
+    finished_job = Signal(dict)
+
+    def __init__(self, cfg, parent=None):
+        super().__init__(parent)
+        self.cfg = cfg
+        self._stop = threading.Event()
+
+    def request_stop(self) -> None:
+        self._stop.set()
+
+    def _emit(self, kind: str, payload: dict) -> None:
+        if kind == "log":
+            self.log.emit(payload["msg"])
+        elif kind == "episodes":
+            self.episodes.emit(payload["episodes"])
+        elif kind == "episode_update":
+            self.episode_update.emit(payload)
+        elif kind == "encode_progress":
+            self.encode_progress.emit(payload)
+        elif kind == "job_progress":
+            self.job_progress.emit(payload)
+        elif kind == "finished":
+            self.finished_job.emit(payload)
+
+    def work(self) -> None:
+        from ..core.local_job import LocalJob
+        LocalJob(self.cfg, self._emit, self._stop.is_set).run()
+
+    def on_crash(self, exc: Exception) -> None:
+        self.log.emit(f"convert failed: {exc}")
+        self.finished_job.emit({"ok": False, "error": str(exc)})
+
+
 class SendWorker(_Worker):
     event = Signal(str, dict)
     done = Signal(list)

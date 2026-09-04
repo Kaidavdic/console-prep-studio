@@ -31,6 +31,9 @@ than one raw episode of free space.
 5. **Sends the batch** to the device and runs a post-copy hook, like refreshing KNULLI's
    game list.
 
+Already have the files? The **Convert files** tab does steps 3–5 on any folder you point
+it at — no torrent involved.
+
 State is saved continuously, so you can close the app mid-season and pick up where you
 left off.
 
@@ -38,12 +41,33 @@ left off.
 
 | | |
 |---|---|
-| ![Choosing files](docs/screenshots/01-choose-files.png) **Pick what you actually want.** Every file in the torrent, with detected episode numbers. Pad files are hidden; extras are left unticked. | ![Compression](docs/screenshots/03-compression.png) **Compression.** Resolution, codec, quality, audio language priority, and how subtitles get handled. |
-| ![Profiles](docs/screenshots/04-profiles.png) **Console profiles.** One per device: screen size, encoding defaults, and how to deliver. Ships with an RG35XX H / KNULLI preset. | ![Sending](docs/screenshots/05-send.png) **Send.** Tick the files, watch each one copy and get verified against the source. |
+| ![Choosing files](docs/screenshots/01-choose-files.png) **Pick what you actually want.** Every file in the torrent, with detected episode numbers. Pad files are hidden; extras are left unticked. | ![Convert files](docs/screenshots/03-convert-local.png) **Convert files you already have.** Point it at a folder, tick what to convert, same settings and progress as a torrent job. |
+| ![Compression](docs/screenshots/04-compression.png) **Compression.** Resolution, codec, quality, audio and subtitle handling — including which exact tracks to use. | ![Profiles](docs/screenshots/05-profiles.png) **Console profiles.** One per device: screen size, encoding defaults, and how to deliver. Ships with an RG35XX H / KNULLI preset. |
+| ![Sending](docs/screenshots/06-send.png) **Send.** Tick the files, watch each one copy and get verified against the source. | |
 
 The progress bar in each row carries the stage as well as the percentage — green for done,
 amber while converting, blue while downloading — so you can tell what a long job is doing
 at a glance.
+
+## Using one episode as a template
+
+Picking "subtitle track 2" blind is guesswork, and a release doesn't always order its
+streams the same way in every file. So on the **Compression** tab, choose
+**Which tracks to use → Choose from an episode…**, open one file you know is right, and
+pick from what's actually in it:
+
+```
+Audio
+  English Dub                    English, stereo, AAC
+  1986 Mono Broadcast Audio      Japanese, mono, FLAC     <- pick this
+Subtitles
+  Stylized Subtitles             English, styled          <- and this
+  Basic Subtitles                English, plain text
+```
+
+That choice is then found again on every other episode **by track name and language**, not
+by position — so it still lands on the right track when episode 2 has them in a different
+order. Verified by the test suite, which flips the order deliberately.
 
 ## Install
 
@@ -70,6 +94,7 @@ cps ffmpeg                                        # fetch ffmpeg
 cps profiles                                      # list device profiles
 cps prep "magnet:?xt=urn:btih:..." --limit 3      # download + convert
 cps prep show.torrent --keep-source --out D:\out
+cps convert D:\already-downloaded --match "*S01*" -y   # no torrent involved
 cps send "D:\out\RG35XX H - KNULLI" --profile knulli-rg35xxh
 ```
 
@@ -82,6 +107,7 @@ A profile bundles how to encode with how to deliver:
 | Resolution + fit | `fill` stretches to the panel, `pad` letterboxes, `keep` just scales down |
 | Codec, CRF, preset, tune | x264 by default; x265 is available but can stutter on weaker handheld chips |
 | Audio language priority | e.g. `jpn, und, eng` — first match wins, then it downmixes to stereo AAC |
+| Which tracks to use | pin an exact audio/subtitle track by picking it off a template episode |
 | Subtitle mode | `both`, `burn-in`, `soft`, or `none` |
 | Transfer | `ssh` (scp + a post-copy command), `smb`, or `localdir` for an SD card |
 | Verify | `md5`, `size`, or `none` after each file lands |
@@ -136,6 +162,8 @@ with checksum verification, and a check that the app survives a finished job.
 - One video file per episode. Split or multi-part episodes aren't stitched together.
 - Deleting sources as it goes means the torrent ends at a zero ratio — there's nothing
   left to seed. Turn the option off if you want to keep seeding.
+- A download with no seeders gives up after 15 minutes of no data rather than hanging;
+  progress is saved, so starting the job again resumes it.
 - x265 at 480p can stutter on Allwinner-class handhelds. x264 is the default deliberately.
 
 ## Built with
