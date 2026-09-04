@@ -1,11 +1,17 @@
-"""Main window: five tabs over the shared profile list + one torrent engine port."""
+"""Main window.
+
+Three destinations instead of six tabs. Work happens in one place — the source
+of the work is a switch inside it, not a separate tab — and the things you
+configure once live together under Settings.
+"""
 from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QMessageBox, QTabWidget,
+    QApplication, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget,
+    QVBoxLayout, QWidget,
 )
 
 from . import APP_NAME, __version__
@@ -19,17 +25,33 @@ from .ui.ffmpeg_dialog import ensure_ffmpeg
 from .ui.log_tab import LogTab
 from .ui.profiles_tab import ProfilesTab
 from .ui.send_tab import SendTab
-from .ui.style import app_stylesheet
+from .ui.theme import C, S, stylesheet
+from .ui.widgets import NavBar, Rule, Segmented
+
+
+def _page(switch: Segmented, stack: QStackedWidget) -> QWidget:
+    """A destination that holds a few related screens behind one switch."""
+    page = QWidget()
+    lay = QVBoxLayout(page)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(0)
+    row = QHBoxLayout()
+    row.setContentsMargins(S.xl, S.md, S.xl, 0)
+    row.addWidget(switch)
+    lay.addLayout(row)
+    lay.addWidget(stack, 1)
+    switch.changed.connect(stack.setCurrentIndex)
+    return page
 
 
 class MainWindow(QMainWindow):
     profilesChanged = Signal()
-    currentProfileChanged = Signal(str)   # profile id
+    currentProfileChanged = Signal(str)
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {__version__}")
-        self.resize(940, 680)
+        self.resize(1060, 780)
 
         self.profiles: list[Profile] = load_profiles()
         self._current_id: str = self.profiles[0].id if self.profiles else ""
@@ -41,16 +63,36 @@ class MainWindow(QMainWindow):
         self.convert_tab = ConvertTab(self)
         self.send_tab = SendTab(self)
 
-        tabs = QTabWidget()
-        tabs.addTab(self.download_tab, "Download")
-        tabs.addTab(self.convert_tab, "Convert files")
-        tabs.addTab(self.compression_tab, "Compression")
-        tabs.addTab(self.profiles_tab, "Console Profiles")
-        tabs.addTab(self.send_tab, "Send")
-        tabs.addTab(self.log_tab, "Log")
-        self.setCentralWidget(tabs)
+        # --- Jobs: three ways work arrives, one place it happens ---
+        jobs_stack = QStackedWidget()
+        for w in (self.download_tab, self.convert_tab, self.send_tab):
+            jobs_stack.addWidget(w)
+        jobs = _page(Segmented(["From a torrent", "From a folder", "Send to device"]),
+                     jobs_stack)
 
-        self.statusBar().showMessage(f"data: {settings.data_dir()}")
+        # --- Settings: the things you set once ---
+        settings_stack = QStackedWidget()
+        for w in (self.compression_tab, self.profiles_tab):
+            settings_stack.addWidget(w)
+        setts = _page(Segmented(["Video and audio", "Devices"]), settings_stack)
+
+        self.pages = QStackedWidget()
+        for w in (jobs, setts, self.log_tab):
+            self.pages.addWidget(w)
+
+        self.nav = NavBar(["Jobs", "Settings", "Log"])
+        self.nav.changed.connect(self.pages.setCurrentIndex)
+
+        root = QWidget()
+        lay = QVBoxLayout(root)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self.nav)
+        lay.addWidget(Rule())
+        lay.addWidget(self.pages, 1)
+        self.setCentralWidget(root)
+
+        self.statusBar().showMessage(str(settings.data_dir()))
 
     # -- shared profile state --------------------------------------
     def current_profile(self) -> Profile:
@@ -81,7 +123,6 @@ class MainWindow(QMainWindow):
         self.log_tab.append(msg)
 
     def closeEvent(self, event) -> None:
-        """Ask running workers to stop and wait, so nothing is torn down mid-run."""
         workers = [self.download_tab.worker, self.download_tab.meta_worker,
                    self.download_tab.send_worker, self.send_tab.worker,
                    self.convert_tab.worker]
@@ -98,7 +139,8 @@ def main(argv: list[str] | None = None) -> int:
     crashlog.install()
     app = QApplication(argv if argv is not None else sys.argv)
     app.setApplicationName(APP_NAME)
-    app.setStyleSheet(app_stylesheet())
+    app.setStyle("Fusion")            # a predictable base for the sheet to sit on
+    app.setStyleSheet(stylesheet())
 
     win = MainWindow()
     win.show()
@@ -108,8 +150,7 @@ def main(argv: list[str] | None = None) -> int:
             QMessageBox.warning(
                 win, "ffmpeg needed",
                 "Conversions won't run until ffmpeg is available. "
-                "Use the Compression tab's 'Locate ffmpeg' button later.",
-            )
+                "Settings has a button to find or download it.")
 
     return app.exec()
 

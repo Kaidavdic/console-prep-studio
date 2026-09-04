@@ -16,7 +16,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QStyledItemDelegate
 
-from .style import stage_color, text_on
+from .theme import stage_color, text_on
 
 FRACTION = Qt.UserRole
 STAGE = Qt.UserRole + 1
@@ -35,6 +35,11 @@ class ProgressDelegate(QStyledItemDelegate):
         stage = index.data(STAGE) or "queued"
         label = index.data(LABEL) or ""
         frac = max(0.0, min(1.0, float(frac)))
+
+        # before a run there is nothing to report, and an empty trough on every
+        # row is just noise - leave the column blank until it means something
+        if frac <= 0 and not label:
+            return
 
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)

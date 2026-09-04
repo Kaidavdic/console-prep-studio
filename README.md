@@ -45,9 +45,15 @@ left off.
 | ![Compression](docs/screenshots/04-compression.png) **Compression.** Resolution, codec, quality, audio and subtitle handling — including which exact tracks to use. | ![Profiles](docs/screenshots/05-profiles.png) **Console profiles.** One per device: screen size, encoding defaults, and how to deliver. Ships with an RG35XX H / KNULLI preset. |
 | ![Sending](docs/screenshots/06-send.png) **Send.** Tick the files, watch each one copy and get verified against the source. | |
 
+Three destinations, not a wall of tabs. The paste field is the whole top of the window
+until a run starts, at which point the same space becomes the job's status — so the top of
+the screen always answers the one question that matters right then. Everything you set
+once lives under **Options**.
+
 The progress bar in each row carries the stage as well as the percentage — green for done,
 amber while converting, blue while downloading — so you can tell what a long job is doing
-at a glance.
+from across the room. Every colour pairing in the app is contrast-checked in the test
+suite rather than eyeballed.
 
 ## Using one episode as a template
 

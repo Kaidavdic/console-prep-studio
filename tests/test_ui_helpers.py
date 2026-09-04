@@ -101,19 +101,37 @@ def test_progress_labels_are_readable_on_every_stage_colour():
                 f"{stage} bar label only reaches {contrast_ratio(text_on(fill), fill):.2f}:1"
 
 
-def test_muted_text_meets_contrast_in_both_themes():
-    import os
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtGui import QColor, QPalette
-    from PySide6.QtWidgets import QApplication
+def test_secondary_text_is_readable_on_the_app_surfaces():
+    """The app paints its own dark background rather than following the system
+    theme, so contrast is checked against the surfaces it actually uses."""
+    from PySide6.QtGui import QColor
 
-    from cps.ui.style import contrast_ratio, muted_color
+    from cps.ui.theme import C, contrast_ratio
 
-    app = QApplication.instance() or QApplication([])
-    for win, txt in ((QColor(32, 32, 32), QColor(255, 255, 255)),
-                     (QColor(255, 255, 255), QColor(0, 0, 0))):
-        pal = QPalette()
-        pal.setColor(QPalette.Window, win)
-        pal.setColor(QPalette.WindowText, txt)
-        app.setPalette(pal)
-        assert contrast_ratio(muted_color(), win) >= 4.5
+    bg, surface = QColor(C.bg), QColor(C.surface)
+    for name, colour in (("text", C.text), ("muted", C.muted)):
+        for surf_name, surf in (("bg", bg), ("surface", surface)):
+            ratio = contrast_ratio(QColor(colour), surf)
+            assert ratio >= 4.5, f"{name} on {surf_name} is only {ratio:.2f}:1"
+
+
+def test_faint_text_clears_the_large_text_threshold():
+    """`faint` is only used for labels under big numbers and placeholder hints,
+    so it is held to 3:1 rather than 4.5:1."""
+    from PySide6.QtGui import QColor
+
+    from cps.ui.theme import C, contrast_ratio
+
+    assert contrast_ratio(QColor(C.faint), QColor(C.bg)) >= 3.0
+
+
+def test_accent_button_label_is_readable():
+    """White on the accent is text, so 4.5:1. The accent as a filled shape on
+    the background is a non-text element, so 3:1 applies there."""
+    from PySide6.QtGui import QColor
+
+    from cps.ui.theme import C, contrast_ratio
+
+    for state in (C.accent, C.accent_hi):
+        assert contrast_ratio(QColor(C.on_accent), QColor(state)) >= 4.5,             f"{state} label only reaches {contrast_ratio(QColor(C.on_accent), QColor(state)):.2f}:1"
+    assert contrast_ratio(QColor(C.accent), QColor(C.bg)) >= 3.0

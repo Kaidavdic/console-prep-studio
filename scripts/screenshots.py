@@ -24,7 +24,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from cps.app import MainWindow  # noqa: E402
-from cps.ui.style import app_stylesheet  # noqa: E402
+from cps.ui.theme import stylesheet  # noqa: E402
 
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "docs/screenshots").resolve()
 OUT.mkdir(parents=True, exist_ok=True)
@@ -73,13 +73,13 @@ def shot(widget, name: str) -> None:
 
 
 app = QApplication([])
-app.setStyleSheet(app_stylesheet())
+app.setStyle('Fusion')
+app.setStyleSheet(stylesheet())
 win = MainWindow()
 win.resize(*SIZE)
 win.show()
 app.processEvents()
 
-tabs = win.centralWidget()
 dl = win.download_tab
 
 # --- 1. after Load files: pick what you want -------------------------------
@@ -89,10 +89,12 @@ dl._show_files(TORRENT)
 for row in (5, 6):
     dl.table.item(row, 0).setCheckState(Qt.Unchecked)
 dl._update_selection_summary()
-tabs.setCurrentWidget(dl)
+win.nav.select(0)
 shot(win, "01-choose-files")
 
 # --- 2. mid-job: one converting, one downloading, three done ---------------
+dl.status.title.setText("Dragon Ball V2 480p DBox DVD")
+dl.hero.setCurrentWidget(dl.status)
 dl._set_running(True)
 dl._plan([{"file_index": f.index, "number": f.number, "title": f.episode}
           for f in TORRENT[:5]])
@@ -108,7 +110,6 @@ for f in TORRENT[5:]:
 dl._job_progress({"episodes_done": 3, "episodes_total": 5,
                   "bytes_done": int(11.2 * GB), "bytes_total": int(17.2 * GB),
                   "fraction": 0.65, "rate": 3_400_000, "eta_seconds": 4_180})
-dl.job_title.setText("Dragon Ball V2 480p DBox DVD")
 shot(win, "02-running")
 
 # --- 3. convert files already on disk --------------------------------------
@@ -120,7 +121,7 @@ for n in range(1, 7):
 cv = win.convert_tab
 cv.folder.setText(str(local))
 cv._scan()
-tabs.setCurrentWidget(cv)
+win.nav.select(0)
 shot(win, "03-convert-local")
 
 # --- 4. compression settings + which tracks to use -------------------------
@@ -132,11 +133,11 @@ prof.audio_choice = TrackChoice(mode="pinned", language="jpn", codec="flac",
 prof.sub_choice = TrackChoice(mode="pinned", language="eng", codec="ass",
                               title="Stylized Subtitles", index=0)
 comp._refresh_picks()
-tabs.setCurrentWidget(comp)
+win.nav.select(1)
 shot(win, "04-compression")
 
 # --- 5. console profiles ---------------------------------------------------
-tabs.setCurrentWidget(win.profiles_tab)
+win.nav.select(1)
 win.profiles_tab.list.setCurrentRow(0)
 shot(win, "05-profiles")
 
@@ -162,7 +163,7 @@ for row in range(3):
 set_progress(st.table.item(3, 3), 0.55, "sending", "Sending 55%")
 st.title.setText("Sending to RG35XX H - KNULLI")
 st._update_live(int(0.55 * 164 * 1024 * 1024))
-tabs.setCurrentWidget(st)
+win.nav.select(0)
 shot(win, "06-send")
 
 win.close()

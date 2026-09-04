@@ -42,8 +42,18 @@ class CompressionTab(QWidget):
         self.sub_index.setSpecialValueText("by language")
         self.container = QComboBox(); self.container.addItems(["mkv", "mp4"])
 
+        # a form of full-width inputs reads as a wall; size each to its content
+        for w, width in ((self.width, 90), (self.height, 90), (self.fit, 110),
+                         (self.vcodec, 140), (self.crf, 90), (self.preset, 160),
+                         (self.tune, 160), (self.acodec, 140), (self.abitrate, 110),
+                         (self.achannels, 90), (self.sub_mode, 140),
+                         (self.sub_lang, 110), (self.sub_index, 140),
+                         (self.container, 110)):
+            w.setFixedWidth(width)
+        self.alang.setFixedWidth(280)
+
         vbox = QGroupBox("Video")
-        vf = QFormLayout(vbox)
+        vf = QFormLayout(vbox); vf.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
         res = QHBoxLayout(); res.addWidget(self.width); res.addWidget(QLabel("x")); res.addWidget(self.height)
         res.addWidget(QLabel("fit")); res.addWidget(self.fit); res.addStretch(1)
         vf.addRow("Resolution", self._wrap(res))
@@ -53,14 +63,14 @@ class CompressionTab(QWidget):
         vf.addRow("Tune", self.tune)
 
         abox = QGroupBox("Audio")
-        af = QFormLayout(abox)
+        af = QFormLayout(abox); af.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
         af.addRow("Language priority", self.alang)
         af.addRow("Codec", self.acodec)
         af.addRow("Bitrate", self.abitrate)
         af.addRow("Channels", self.achannels)
 
         sbox = QGroupBox("Subtitles")
-        sf = QFormLayout(sbox)
+        sf = QFormLayout(sbox); sf.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
         sf.addRow("Mode", self.sub_mode)
         sf.addRow("Language", self.sub_lang)
         sf.addRow("Track index", self.sub_index)
@@ -68,7 +78,7 @@ class CompressionTab(QWidget):
 
         # --- pick tracks off a real episode instead of guessing indexes ---
         tbox = QGroupBox("Which tracks to use")
-        tf = QFormLayout(tbox)
+        tf = QFormLayout(tbox); tf.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.tpl_btn = QPushButton("Choose from an episode…")
         self.tpl_btn.clicked.connect(self._pick_tracks)
         self.tpl_clear = QPushButton("Back to automatic")
