@@ -519,8 +519,16 @@ class DownloadTab(QWidget):
         if row is None:
             return
         pct = p["fraction"] * 100
+        stalled = p.get("stalled_seconds", 0)
         if p["fraction"] >= 1.0:
             self._set_row(row, 1.0, "downloading", "Downloaded")
+        elif stalled:
+            # say what is actually happening instead of showing a frozen speed
+            self._set_row(row, p["fraction"],
+                          "error" if stalled > 120 else "downloading",
+                          f"Waiting for peers  {pct:.0f}%",
+                          f"{p.get('peers', 0)} peers", "—")
+            self.job_left.setText(f"nothing received for {human_eta(stalled)}")
         else:
             self._set_row(row, p["fraction"], "downloading", f"Downloading {pct:.0f}%",
                           human_rate(p.get("rate", 0)),

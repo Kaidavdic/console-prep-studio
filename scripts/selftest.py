@@ -92,11 +92,13 @@ profile = Profile(
 from cps.core.metadata import fetch_file_list  # noqa: E402
 
 listed = fetch_file_list(str(tfile), timeout=15)
-print("file list:", [(f.path.split("\\")[-1], f.is_video, f.episode) for f in listed])
+print("file list:", [(os.path.basename(f.path.replace("\\", "/")), f.is_video, f.episode)
+                     for f in listed])
 pick = [f.path for f in listed if f.episode in ("Cool Anime 001", "Cool Anime 003")]
 
 cfg = JobConfig(source=str(tfile), save_path=DL, output_root=OUT, profile=profile,
-                delete_source=True, metadata_timeout=30, selected_files=pick)
+                delete_source=True, metadata_timeout=30, selected_files=pick,
+                stall_timeout=120)   # a CI runner that never peers should fail, not hang
 
 peak_bytes = 0
 events: list = []

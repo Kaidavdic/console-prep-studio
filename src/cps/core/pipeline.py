@@ -90,6 +90,9 @@ class JobConfig:
     metadata_timeout: float = 180.0
     episode_limit: int | None = None          # only process the first N episodes
     selected_files: list[str] | None = None   # torrent-relative paths; None = every video file
+    # give up on a file after this many seconds with no new bytes at all, so a
+    # dead torrent reports itself instead of waiting for ever. 0 disables it.
+    stall_timeout: float = 900.0
 
 
 class Pipeline:
@@ -264,6 +267,10 @@ class Pipeline:
 
         last = 0.0
         started = time.monotonic()
+        best = self.torrent.file_bytes(i)
+        moved_at = started
+        warned = False
+
         while not self.torrent.file_done(i):
             if self.should_stop():
                 return
@@ -273,6 +280,24 @@ class Pipeline:
             st = self.torrent.status()
             self._rate = _ema(self._rate, st["download_rate"])
             now = time.monotonic()
+
+            # stall detection: a torrent nobody is seeding would otherwise sit
+            # here for ever with no clue why
+            if got > best:
+                best, moved_at, warned = got, now, False
+            stalled_for = now - moved_at
+            if self.cfg.stall_timeout and stalled_for > self.cfg.stall_timeout:
+                raise RuntimeError(
+                    f"No data for {int(stalled_for // 60)} minutes on {ep.title} "
+                    f"({st['num_peers']} peers, {st['num_seeds']} seeds). "
+                    "The torrent may have no seeders left. Progress is saved, so "
+                    "you can start it again later."
+                )
+            if stalled_for > 60 and not warned:
+                self._log(f"waiting for peers on {ep.title} — no data for a minute "
+                          f"({st['num_peers']} peers)")
+                warned = True
+
             if now - last > 0.5:
                 self.emit("download_progress", {
                     "file_index": i, "fraction": frac,
@@ -280,6 +305,7 @@ class Pipeline:
                     "rate": st["download_rate"], "avg_rate": self._rate,
                     "eta_seconds": (size - got) / self._rate if self._rate > 1 else 0.0,
                     "peers": st["num_peers"], "seeds": st["num_seeds"],
+                    "stalled_seconds": stalled_for if stalled_for > 20 else 0.0,
                 })
                 self._emit_job_progress(current_done=got, current_total=size)
                 last = now

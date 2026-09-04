@@ -11,6 +11,7 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -42,6 +43,7 @@ jobs:
       - name: End-to-end self-test
         if: runner.os == 'Linux'
         continue-on-error: true
+        timeout-minutes: 10
         env:
           QT_QPA_PLATFORM: offscreen
         run: python scripts/selftest.py
