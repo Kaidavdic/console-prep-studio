@@ -36,6 +36,31 @@ def stage_color(stage: str) -> QColor:
     return QColor(dark if is_dark() else light)
 
 
+def _relative_luminance(c: QColor) -> float:
+    def channel(v: int) -> float:
+        v /= 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    return (0.2126 * channel(c.red()) + 0.7152 * channel(c.green())
+            + 0.0722 * channel(c.blue()))
+
+
+def contrast_ratio(a: QColor, b: QColor) -> float:
+    """WCAG contrast between two colours, 1:1 (identical) to 21:1 (black/white)."""
+    hi, lo = sorted((_relative_luminance(a), _relative_luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def text_on(background: QColor) -> QColor:
+    """Black or white, whichever is actually readable on this background.
+
+    The stage colours are mid-tone by design, so white text on a filled bar can
+    fall to about 2.2:1 — under the 4.5:1 minimum. Pick per background instead
+    of assuming the palette's text colour works everywhere.
+    """
+    white, black = QColor("#ffffff"), QColor("#000000")
+    return white if contrast_ratio(white, background) >= contrast_ratio(black, background) else black
+
+
 def muted_color() -> QColor:
     """Secondary text: readable but clearly subordinate, in either theme.
 

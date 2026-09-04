@@ -16,7 +16,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QStyledItemDelegate
 
-from .style import stage_color
+from .style import stage_color, text_on
 
 FRACTION = Qt.UserRole
 STAGE = Qt.UserRole + 1
@@ -50,15 +50,25 @@ class ProgressDelegate(QStyledItemDelegate):
         painter.setBrush(trough)
         painter.drawRoundedRect(rect, _RADIUS, _RADIUS)
 
+        fill = QRectF(rect)
+        fill.setWidth(rect.width() * frac)
         if frac > 0:
-            fill = QRectF(rect)
-            fill.setWidth(rect.width() * frac)
             painter.setBrush(colour)
             painter.drawRoundedRect(fill, _RADIUS, _RADIUS)
 
         if label:
+            # The label sits across both the filled bar and the empty trough,
+            # and no single colour is readable on both, so draw it once per
+            # region with a colour picked for that background.
             painter.setPen(QPen(option.palette.text().color()))
+            painter.setClipRect(rect.adjusted(fill.width(), 0, 0, 0))
             painter.drawText(rect, Qt.AlignCenter, label)
+
+            if frac > 0:
+                painter.setPen(QPen(text_on(colour)))
+                painter.setClipRect(fill)
+                painter.drawText(rect, Qt.AlignCenter, label)
+            painter.setClipping(False)
 
         painter.restore()
 
